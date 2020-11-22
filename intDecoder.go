@@ -26,12 +26,12 @@ type chunkedIntDecoder struct {
 	dataStartOffset uint64
 	chunkOffsets    []uint64
 	curChunkBytes   []byte
-	data            []byte
+	data            *SegmentBase
 	r               *segment.MemUvarintReader
 }
 
 // newChunkedIntDecoder expects an optional or reset chunkedIntDecoder for better reuse.
-func newChunkedIntDecoder(buf []byte, offset uint64, rv *chunkedIntDecoder) *chunkedIntDecoder {
+func newChunkedIntDecoder(buf *SegmentBase, offset uint64, rv *chunkedIntDecoder) *chunkedIntDecoder {
 	if rv == nil {
 		rv = &chunkedIntDecoder{startOffset: offset, data: buf}
 	} else {
@@ -44,7 +44,7 @@ func newChunkedIntDecoder(buf []byte, offset uint64, rv *chunkedIntDecoder) *chu
 	if offset == termNotEncoded {
 		numChunks = 0
 	} else {
-		numChunks, read = binary.Uvarint(buf[offset+n : offset+n+binary.MaxVarintLen64])
+		numChunks, read = binary.Uvarint(buf.readMem(offset+n, offset+n+binary.MaxVarintLen64))
 	}
 
 	n += uint64(read)
@@ -54,7 +54,7 @@ func newChunkedIntDecoder(buf []byte, offset uint64, rv *chunkedIntDecoder) *chu
 		rv.chunkOffsets = make([]uint64, int(numChunks))
 	}
 	for i := 0; i < int(numChunks); i++ {
-		rv.chunkOffsets[i], read = binary.Uvarint(buf[offset+n : offset+n+binary.MaxVarintLen64])
+		rv.chunkOffsets[i], read = binary.Uvarint(buf.readMem(offset+n, offset+n+binary.MaxVarintLen64))
 		n += uint64(read)
 	}
 	rv.dataStartOffset = offset + n
@@ -76,7 +76,7 @@ func (d *chunkedIntDecoder) loadChunk(chunk int) error {
 	s, e := readChunkBoundary(chunk, d.chunkOffsets)
 	start += s
 	end += e
-	d.curChunkBytes = d.data[start:end]
+	d.curChunkBytes = d.data.readMem(start, end)
 	if d.r == nil {
 		d.r = segment.NewMemUvarintReader(d.curChunkBytes)
 	} else {
@@ -91,7 +91,7 @@ func (d *chunkedIntDecoder) reset() {
 	d.dataStartOffset = 0
 	d.chunkOffsets = d.chunkOffsets[:0]
 	d.curChunkBytes = d.curChunkBytes[:0]
-	d.data = d.data[:0]
+	d.data = nil
 	if d.r != nil {
 		d.r.Reset([]byte(nil))
 	}
